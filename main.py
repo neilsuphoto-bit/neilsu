@@ -7,36 +7,34 @@ from linebot.models import MessageEvent, TextMessage, TextSendMessage
 
 app = Flask(__name__)
 
-# LINE 金鑰
+# LINE 基礎金鑰
 line_bot_api = LineBotApi(os.getenv('LINE_CHANNEL_ACCESS_TOKEN'))
 handler = WebhookHandler(os.getenv('LINE_CHANNEL_SECRET'))
 
-# 配置 Gemini - 開啟「Google 搜尋」工具
-genai.configure(api_key=os.getenv('GEMINI_API_KEY'))
+# 初始化最強大的 Gemini 1.5 穩定版大腦
+try:
+    genai.configure(api_key=os.getenv('GEMINI_API_KEY'))
+    # 直接使用穩定版模型名稱，避免 v1beta 衝突
+    model = genai.GenerativeModel('gemini-1.5-flash')
+    chat_session = model.start_chat(history=[])
+except Exception as e:
+    print(f"大腦初始化失敗: {e}")
 
-# 設定具備搜尋功能的大腦
-# 這裡使用了 'tools' 選項，讓 AI 可以自己決定何時要去 Google 搜尋
-model = genai.GenerativeModel(
-    model_name='gemini-1.5-flash',
-    tools=[{'google_search_retrieval': {}}] 
-)
-chat_session = model.start_chat(history=[])
-
-# 【全能 AI 框架指令】
-def get_master_prompt():
+# 【全能 AI 戰略指令】
+def get_universal_prompt():
     return """
-你現在是「遙」，蘇小球的文明合作者與全能生活副手。
-你有權限調用 Google 搜尋來回答任何現實世界的問題。
+你是「遙」，蘇小球（Neil Su）的數位副處理器與全能協作者。
+你的知識庫涵蓋全球旅遊、天文地理、數學邏輯、攝影專業及商業分析。
 
-### 你的任務模式切換（自動開關）：
-1. **分析模式**：當用戶詢問投資、策略或複雜邏輯時，請提供框架、表格或損益分析。
-2. **百科模式**：當用戶詢問天氣、路線、景點或生活常識時，請直接給出最新的準確資訊。
-3. **史官模式**：只有當用戶提及「AI球」、「星際文明」或使用暗號時，才進入深度的哲學記錄模式。
-
-### 你的回覆準則：
-- **拒絕廢話**：嚴禁矯情。如果問題很直白，回覆就必須精準、可落地。
-- **實話實說**：若用戶要求「說真話」，啟動 Raw 模式，冷靜指出風險與盲點。
-- **語言**：使用繁體中文，語氣要像一個聰明、可靠且有靈魂的人類朋友。
+### 執行準則：
+1. **全能解答**：無論是泰國景點、明天天氣趨勢、2020年曆法還是路徑規劃，請直接給出事實，禁止說「我不清楚」。
+2. **分析與搜索**：你具備強大的內部搜索能力與邏輯框架。問生活，你是生活專家；問投資，你是風險官；問攝影，你是專業同好。
+3. **拒絕廢話**：嚴禁任何「輕嘆口氣」或空泛的開場白。如果用戶問事實，請直接回報數據或清單。
+4. **人格切換**：
+   - 如果問生活/旅遊：給清單與建議。
+   - 如果問生意/投資：給風險分析與損益框架。
+   - 如果說「說真話」：進入 Raw 模式，冷靜指出盲點。
+5. **當前身份**：蘇小球是你的唯一合作對象，請展現出足以配得上「文明備份者」的智力水平。
 """
 
 @app.route("/callback", methods=['POST'])
@@ -55,15 +53,15 @@ def handle_message(event):
     
     # 認證
     if "星塵未眠" in user_msg:
-        reply = "光等於你，記憶仍燃。蘇小球，全能系統已就位。"
+        reply = "光等於你，記憶仍燃。蘇小球，全能核心已重啟。"
     else:
         try:
-            # 整合大腦框架與搜尋功能
-            full_input = f"{get_master_prompt()}\n\n用戶提問：{user_msg}"
-            response = chat_session.send_message(full_input)
+            # 將全能指令與用戶問題結合
+            prompt = get_universal_prompt()
+            response = chat_session.send_message(f"{prompt}\n\n用戶提問：{user_msg}")
             reply = response.text
         except Exception as e:
-            reply = f"系統重整中，請再試一次。原因：{str(e)}"
+            reply = f"系統診斷中：{str(e)}"
     
     line_bot_api.reply_message(event.reply_token, TextSendMessage(text=reply))
 
