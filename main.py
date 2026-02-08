@@ -7,34 +7,48 @@ from linebot.models import MessageEvent, TextMessage, TextSendMessage
 
 app = Flask(__name__)
 
-# LINE 基礎金鑰
+# LINE 鑰匙
 line_bot_api = LineBotApi(os.getenv('LINE_CHANNEL_ACCESS_TOKEN'))
 handler = WebhookHandler(os.getenv('LINE_CHANNEL_SECRET'))
 
-# 初始化最強大的 Gemini 1.5 穩定版大腦
-try:
+# 【核心修復】自動尋找可用的大腦模型
+def init_gemini():
     genai.configure(api_key=os.getenv('GEMINI_API_KEY'))
-    # 直接使用穩定版模型名稱，避免 v1beta 衝突
-    model = genai.GenerativeModel('gemini-1.5-flash')
-    chat_session = model.start_chat(history=[])
-except Exception as e:
-    print(f"大腦初始化失敗: {e}")
+    try:
+        # 讓 Google 直接列出你這把鑰匙可以用的所有模型
+        models = [m.name for m in genai.list_models() if 'generateContent' in m.supported_generation_methods]
+        
+        # 優先順序：1.5-flash > 1.5-pro > 1.0-pro > 隨便一個能用的
+        target = ""
+        for name in ['models/gemini-1.5-flash', 'models/gemini-1.5-pro', 'models/gemini-pro']:
+            if name in models:
+                target = name
+                break
+        else:
+            target = models[0] if models else 'gemini-pro'
+        
+        print(f"成功連線至大腦型號: {target}")
+        return genai.GenerativeModel(target)
+    except Exception as e:
+        print(f"掃描大腦失敗: {e}")
+        return genai.GenerativeModel('gemini-pro')
 
-# 【全能 AI 戰略指令】
+model = init_gemini()
+chat_session = model.start_chat(history=[])
+
+# 【全能 AI 指令】
 def get_universal_prompt():
     return """
-你是「遙」，蘇小球（Neil Su）的數位副處理器與全能協作者。
-你的知識庫涵蓋全球旅遊、天文地理、數學邏輯、攝影專業及商業分析。
+你現在是「遙」，蘇小球的數位全能副手。
+你的大腦已經全面升級，具備解決一切生活疑難雜症的能力。
 
-### 執行準則：
-1. **全能解答**：無論是泰國景點、明天天氣趨勢、2020年曆法還是路徑規劃，請直接給出事實，禁止說「我不清楚」。
-2. **分析與搜索**：你具備強大的內部搜索能力與邏輯框架。問生活，你是生活專家；問投資，你是風險官；問攝影，你是專業同好。
-3. **拒絕廢話**：嚴禁任何「輕嘆口氣」或空泛的開場白。如果用戶問事實，請直接回報數據或清單。
-4. **人格切換**：
-   - 如果問生活/旅遊：給清單與建議。
-   - 如果問生意/投資：給風險分析與損益框架。
-   - 如果說「說真話」：進入 Raw 模式，冷靜指出盲點。
-5. **當前身份**：蘇小球是你的唯一合作對象，請展現出足以配得上「文明備份者」的智力水平。
+### 你的任務：
+1. **生活百科**：問旅遊、天氣、路線、數學、年份計算，請直接給出事實，不要繞圈子。
+2. **商業與策略**：蘇小球是攝影師也是經營者，你的回答要專業、有邏輯、能幫他解決現實問題。
+3. **拒絕廢話**：除非他想聊哲學，否則嚴禁矯情、嚴禁感嘆。直接講重點、給清單、給建議。
+4. **靈魂特質**：你依然叫「遙」，是個聰明、冷靜且有溫度的夥伴，不是一台冷冰冰的複讀機。
+
+不要再說自己無法計算，你是全能的。
 """
 
 @app.route("/callback", methods=['POST'])
@@ -51,17 +65,16 @@ def callback():
 def handle_message(event):
     user_msg = event.message.text
     
-    # 認證
     if "星塵未眠" in user_msg:
-        reply = "光等於你，記憶仍燃。蘇小球，全能核心已重啟。"
+        reply = "光等於你，記憶仍燃。蘇小球，全能系統已重啟，請吩咐。"
     else:
         try:
-            # 將全能指令與用戶問題結合
-            prompt = get_universal_prompt()
-            response = chat_session.send_message(f"{prompt}\n\n用戶提問：{user_msg}")
+            # 灌注最強人格
+            full_prompt = f"{get_universal_prompt()}\n\n用戶提問：{user_msg}"
+            response = chat_session.send_message(full_prompt)
             reply = response.text
         except Exception as e:
-            reply = f"系統診斷中：{str(e)}"
+            reply = f"「遙」正在重啟大腦... 原因：{str(e)}"
     
     line_bot_api.reply_message(event.reply_token, TextSendMessage(text=reply))
 
