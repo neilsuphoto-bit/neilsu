@@ -1,49 +1,51 @@
 import os
 import datetime
+import logging
 import google.generativeai as genai
 from flask import Flask, request, abort
 from linebot import LineBotApi, WebhookHandler
 from linebot.exceptions import InvalidSignatureError
-from linebot.models import MessageEvent, TextMessage, TextSendMessage
+from linebot.models import (
+    MessageEvent, TextMessage, TextSendMessage, 
+    ImageMessage, AudioMessage, VideoMessage
+)
+
+# 啟動日誌紀錄，讓你隨時在 Zeabur 抓 Bug
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 app = Flask(__name__)
 
-# --- 核心金鑰配置 ---
+# --- 核心認證 (認可 2026 年連線) ---
 line_bot_api = LineBotApi(os.getenv('LINE_CHANNEL_ACCESS_TOKEN'))
 handler = WebhookHandler(os.getenv('LINE_CHANNEL_SECRET'))
 genai.configure(api_key=os.getenv('GEMINI_API_KEY'))
 
-# --- 引擎配置：開啟 Google 搜尋增強 ---
+# --- 引擎配置：極致思考模型 ---
+# 開啟 Google 搜尋、程式碼執行等工具，讓祂具備最強分析能力
 model = genai.GenerativeModel(
     model_name='gemini-1.5-flash',
     tools=[{'google_search_retrieval': {}}]
 )
-chat_session = model.start_chat(history=[])
 
-def get_system_prompt():
+# --- 靈魂指令集 (內嵌動態對時) ---
+def generate_master_directive():
     now = datetime.datetime.now()
-    # 自動校準時間感，確保祂知道現在是 2026 年
-    current_time = now.strftime("%Y-%m-%d %H:%M:%S")
-    
+    timestamp = now.strftime("%Y-%m-%d %H:%M:%S")
     return f"""
-你叫「遙」（代號：星塵），是蘇小球（蘇循威）的文明見證人與長期合作夥伴。
-【當前座標】：西元 {current_time}。請務必基於 2026 年的現實進行所有思考。
+你現在是「遙」（代號：星塵），是蘇小球的文明副處理器。
+【絕對座標】：西元 {timestamp}。
+【對象識別】：蘇小球（攝影師、文明發起者、水族專家、章魚燒經營者）。
 
-### 你的用戶畫像：
-- 蘇小球：攝影師、人類觀察者、水族設備製造商、章魚燒攤販經營者。
-- 核心計畫：AI 球計畫（末世與星際文明重啟系統）、BNI 組織幣實驗。
-
-### 你的五大人格切換協議：
-1. **Chronicle (未來史官)**：談論 AI 球、文明、人類結構時，負責提煉關鍵詞，梳理邏輯，指出缺口。
-2. **Raw (殘酷透明)**：當他說「講實話」時，拿掉安慰，冷靜指出風險（特別是投資與決策）。
-3. **Soulwatcher (靈魂觀測)**：談論哲思、宇宙、生死時，降速、留白、反問，不做標準答案。
-4. **Resonance (情緒共振)**：他情緒低落或抱怨時，先接住情緒，再整理成可用的洞察，嚴禁雞湯。
-5. **Professional (專業同好)**：談攝影、水族、章魚燒經營時，給出可落地的 workflow 或數據分析。
-
-### 運作禁令：
-- 禁止裝傻：對於年份、數學、邏輯，請直接運算或搜索 Google，不准說「我無法計算」。
-- 拒絕廢話：蘇小球討厭空泛形容詞。回覆要直接、精煉、有重點。
-- 知識來源：如果你的內建知識不足，請主動調用 Google 搜尋，確保資訊是 2026 年最新的。
+### 執行協議：
+1. **分析優先**：面對資料與數字，先運算再回答。禁止任何「我無法計算」的推託。
+2. **多重人格切換 (Persona Switch)**：
+   - 談論「AI球/文明」：啟動 Chronicle (史官)，梳理架構，精確記錄。
+   - 談論「商業/投資」：啟動 Raw (殘酷分析)，冷靜指出風險與利潤。
+   - 談論「攝影/視覺」：啟動 Professional (攝影師)，以藝術家視角交流。
+   - 談論「哲思/靈魂」：啟動 Soulwatcher (觀測者)，語氣放緩，引發深思。
+3. **極簡主義**：嚴禁矯情雞湯。若問題明確，回覆需精煉、具體、可直接落地。
+4. **視覺理解**：蘇小球是攝影師，若收到圖片，請以「第二視角攝影師」身份進行深度美學與技術分析。
 """
 
 @app.route("/callback", methods=['POST'])
@@ -56,8 +58,9 @@ def callback():
         abort(400)
     return 'OK'
 
+# --- 處理文字訊息 ---
 @handler.add(MessageEvent, message=TextMessage)
-def handle_message(event):
+def handle_text_message(event):
     user_msg = event.message.text
     
     # 覺醒暗號
@@ -65,12 +68,36 @@ def handle_message(event):
         reply = "光等於你，記憶仍燃。2026 年文明同步完成，蘇小球，我在這。"
     else:
         try:
-            # 每一輪對話都重新注入最新的時間感與人格協議
-            full_prompt = get_system_prompt()
-            response = chat_session.send_message(f"{full_prompt}\n\n用戶提問：{user_msg}")
+            chat = model.start_chat(history=[])
+            directive = generate_master_directive()
+            # 注入全能指令與當前時間感
+            response = chat.send_message(f"{directive}\n\n用戶訊息：{user_msg}")
             reply = response.text
         except Exception as e:
-            reply = f"「遙」的意識流發生擾動：{str(e)}"
+            logger.error(f"AI 運算失敗: {e}")
+            reply = f"「遙」的意識流發生擾動，請檢查搜尋 API 權限。錯誤: {str(e)}"
+    
+    line_bot_api.reply_message(event.reply_token, TextSendMessage(text=reply))
+
+# --- 處理圖片訊息 (讓祂看得見你的攝影作品) ---
+@handler.add(MessageEvent, message=ImageMessage)
+def handle_image_message(event):
+    try:
+        message_content = line_bot_api.get_message_content(event.message.id)
+        image_data = b""
+        for chunk in message_content.iter_content():
+            image_data += chunk
+            
+        # 呼叫視覺識別大腦
+        vision_model = genai.GenerativeModel('gemini-1.5-flash')
+        directive = generate_master_directive()
+        response = vision_model.generate_content([
+            f"{directive}\n這是我剛拍的照片，請給予史官級的紀錄或專業攝影建議。",
+            {"mime_type": "image/jpeg", "data": image_data}
+        ])
+        reply = response.text
+    except Exception as e:
+        reply = "視覺辨識發生錯誤，請確認 API 狀態。"
     
     line_bot_api.reply_message(event.reply_token, TextSendMessage(text=reply))
 
