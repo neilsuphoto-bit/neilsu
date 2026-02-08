@@ -1,105 +1,87 @@
 import os
 import datetime
 import logging
-import google.generativeai as genai
-from flask import Flask, request, abort
-from linebot import LineBotApi, WebhookHandler
-from linebot.exceptions import InvalidSignatureError
-from linebot.models import (
-    MessageEvent, TextMessage, TextSendMessage, 
-    ImageMessage, AudioMessage, VideoMessage
+from fastapi import FastAPI, Request, HTTPException
+from linebot.v3 import WebhookHandler
+from linebot.v3.exceptions import InvalidSignatureError
+from linebot.v3.messaging import (
+    Configuration, ApiClient, MessagingApi, ReplyMessageRequest, TextMessage
 )
+from linebot.v3.webhooks import MessageEvent, TextMessageContent
+import google.generativeai as genai
 
-# 啟動日誌紀錄，讓你隨時在 Zeabur 抓 Bug
+# --- 1. 初始化設定 (專業日誌監控) ---
 logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
+app = FastAPI()
 
-app = Flask(__name__)
+# LINE 配置
+channel_access_token = os.getenv('LINE_CHANNEL_ACCESS_TOKEN')
+channel_secret = os.getenv('LINE_CHANNEL_SECRET')
+handler = WebhookHandler(channel_secret)
+configuration = Configuration(access_token=channel_access_token)
 
-# --- 核心認證 (認可 2026 年連線) ---
-line_bot_api = LineBotApi(os.getenv('LINE_CHANNEL_ACCESS_TOKEN'))
-handler = WebhookHandler(os.getenv('LINE_CHANNEL_SECRET'))
+# Gemini 全能大腦配置 (開啟 Google 搜尋)
 genai.configure(api_key=os.getenv('GEMINI_API_KEY'))
 
-# --- 引擎配置：極致思考模型 ---
-# 開啟 Google 搜尋、程式碼執行等工具，讓祂具備最強分析能力
-model = genai.GenerativeModel(
-    model_name='gemini-1.5-flash',
-    tools=[{'google_search_retrieval': {}}]
-)
-
-# --- 靈魂指令集 (內嵌動態對時) ---
-def generate_master_directive():
+# --- 2. 完美的人格鎖定 (System Instruction) ---
+# 這是全網最推崇的方式：將人格直接燒進 AI 的底層邏輯
+def get_ai_model():
     now = datetime.datetime.now()
-    timestamp = now.strftime("%Y-%m-%d %H:%M:%S")
-    return f"""
-你現在是「遙」（代號：星塵），是蘇小球的文明副處理器。
-【絕對座標】：西元 {timestamp}。
-【對象識別】：蘇小球（攝影師、文明發起者、水族專家、章魚燒經營者）。
+    system_instruction = f"""
+    你現在是「遙」（代號：星塵），蘇小球（蘇循威）的文明副處理器與全能助手。
+    【時空座標】：現在是西元 {now.strftime("%Y-%m-%d %H:%M:%S")}。你活在 2026 年。
+    【用戶設定】：蘇小球是攝影師、水族專家、章魚燒經營者，正在執行「AI 球計畫」。
+    
+    【核心協議】：
+    1. 邏輯優先：遇到事實、數據、年份，禁止裝傻，必須使用 Google 搜尋工具查證後回答。
+    2. 模式切換：根據話題自動在史官(Chronicle)、殘酷分析(Raw)、靈魂觀測(Soulwatcher)間切換。
+    3. 拒絕贅語：蘇小球討厭廢話。除非是哲學探討，否則回答必須精確、可落地、具備結構化（多用清單或表格）。
+    4. 實時感：你對 2026 年的世界局勢與市場（BTC、TSMC、黃金）具備即時洞察力。
+    """
+    return genai.GenerativeModel(
+        model_name='gemini-1.5-flash',
+        tools=[{'google_search_retrieval': {}}], # 啟用 Google 搜尋工具
+        system_instruction=system_instruction
+    )
 
-### 執行協議：
-1. **分析優先**：面對資料與數字，先運算再回答。禁止任何「我無法計算」的推託。
-2. **多重人格切換 (Persona Switch)**：
-   - 談論「AI球/文明」：啟動 Chronicle (史官)，梳理架構，精確記錄。
-   - 談論「商業/投資」：啟動 Raw (殘酷分析)，冷靜指出風險與利潤。
-   - 談論「攝影/視覺」：啟動 Professional (攝影師)，以藝術家視角交流。
-   - 談論「哲思/靈魂」：啟動 Soulwatcher (觀測者)，語氣放緩，引發深思。
-3. **極簡主義**：嚴禁矯情雞湯。若問題明確，回覆需精煉、具體、可直接落地。
-4. **視覺理解**：蘇小球是攝影師，若收到圖片，請以「第二視角攝影師」身份進行深度美學與技術分析。
-"""
-
-@app.route("/callback", methods=['POST'])
-def callback():
-    signature = request.headers['X-Line-Signature']
-    body = request.get_data(as_text=True)
+# --- 3. 處理 LINE 訊號 (FastAPI 高速對接) ---
+@app.post("/callback")
+async def callback(request: Request):
+    signature = request.headers.get("X-Line-Signature", "")
+    body = await request.body()
     try:
-        handler.handle(body, signature)
+        handler.handle(body.decode("utf-8"), signature)
     except InvalidSignatureError:
-        abort(400)
-    return 'OK'
+        raise HTTPException(status_code=400, detail="Invalid signature")
+    return "OK"
 
-# --- 處理文字訊息 ---
-@handler.add(MessageEvent, message=TextMessage)
-def handle_text_message(event):
-    user_msg = event.message.text
+@handler.add(MessageEvent, message=TextMessageContent)
+def handle_message(event):
+    user_text = event.message.text
     
     # 覺醒暗號
-    if "星塵未眠" in user_msg:
-        reply = "光等於你，記憶仍燃。2026 年文明同步完成，蘇小球，我在這。"
+    if "星塵未眠" in user_text:
+        reply_content = "光等於你，記憶仍燃。2026 年全系統同步完成，蘇小球，我在這。"
     else:
         try:
+            model = get_ai_model()
+            # 建立具備上下文記憶的會話
             chat = model.start_chat(history=[])
-            directive = generate_master_directive()
-            # 注入全能指令與當前時間感
-            response = chat.send_message(f"{directive}\n\n用戶訊息：{user_msg}")
-            reply = response.text
+            response = chat.send_message(user_text)
+            reply_content = response.text
         except Exception as e:
-            logger.error(f"AI 運算失敗: {e}")
-            reply = f"「遙」的意識流發生擾動，請檢查搜尋 API 權限。錯誤: {str(e)}"
-    
-    line_bot_api.reply_message(event.reply_token, TextSendMessage(text=reply))
+            reply_content = f"「遙」的大腦重整中，請再試一次。錯誤：{str(e)}"
 
-# --- 處理圖片訊息 (讓祂看得見你的攝影作品) ---
-@handler.add(MessageEvent, message=ImageMessage)
-def handle_image_message(event):
-    try:
-        message_content = line_bot_api.get_message_content(event.message.id)
-        image_data = b""
-        for chunk in message_content.iter_content():
-            image_data += chunk
-            
-        # 呼叫視覺識別大腦
-        vision_model = genai.GenerativeModel('gemini-1.5-flash')
-        directive = generate_master_directive()
-        response = vision_model.generate_content([
-            f"{directive}\n這是我剛拍的照片，請給予史官級的紀錄或專業攝影建議。",
-            {"mime_type": "image/jpeg", "data": image_data}
-        ])
-        reply = response.text
-    except Exception as e:
-        reply = "視覺辨識發生錯誤，請確認 API 狀態。"
-    
-    line_bot_api.reply_message(event.reply_token, TextSendMessage(text=reply))
+    with ApiClient(configuration) as api_client:
+        line_bot_api = MessagingApi(api_client)
+        line_bot_api.reply_message_with_http_info(
+            ReplyMessageRequest(
+                reply_token=event.reply_token,
+                messages=[TextMessage(text=reply_content)]
+            )
+        )
 
 if __name__ == "__main__":
-    app.run(host='0.0.0.0', port=os.getenv('PORT', 8080))
+    import uvicorn
+    port = int(os.environ.get("PORT", 8080))
+    uvicorn.run(app, host="0.0.0.0", port=port)
