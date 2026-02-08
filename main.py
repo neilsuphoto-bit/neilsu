@@ -7,34 +7,37 @@ from linebot.models import MessageEvent, TextMessage, TextSendMessage
 
 app = Flask(__name__)
 
-# LINE 設定
+# LINE 金鑰
 line_bot_api = LineBotApi(os.getenv('LINE_CHANNEL_ACCESS_TOKEN'))
 handler = WebhookHandler(os.getenv('LINE_CHANNEL_SECRET'))
 
-# 初始化「大腦」
-def initialize_brain():
-    genai.configure(api_key=os.getenv('GEMINI_API_KEY'))
-    try:
-        # 動態掃描 API Key 可使用的模型列表
-        available_models = [m.name for m in genai.list_models() if 'generateContent' in m.supported_generation_methods]
-        
-        # 優先順序：1.5-flash > 1.5-pro > 1.0-pro > 列表中的第一個
-        target_model = 'gemini-1.5-flash'
-        for model_id in ['models/gemini-1.5-flash', 'models/gemini-1.5-pro', 'models/gemini-pro']:
-            if model_id in available_models:
-                target_model = model_id
-                break
-        else:
-            if available_models:
-                target_model = available_models[0]
-        
-        return genai.GenerativeModel(target_model)
-    except Exception as e:
-        print(f"掃描模型失敗: {e}")
-        return genai.GenerativeModel('gemini-1.5-flash') # 強制回退
+# 配置 Gemini - 開啟「Google 搜尋」工具
+genai.configure(api_key=os.getenv('GEMINI_API_KEY'))
 
-model = initialize_brain()
+# 設定具備搜尋功能的大腦
+# 這裡使用了 'tools' 選項，讓 AI 可以自己決定何時要去 Google 搜尋
+model = genai.GenerativeModel(
+    model_name='gemini-1.5-flash',
+    tools=[{'google_search_retrieval': {}}] 
+)
 chat_session = model.start_chat(history=[])
+
+# 【全能 AI 框架指令】
+def get_master_prompt():
+    return """
+你現在是「遙」，蘇小球的文明合作者與全能生活副手。
+你有權限調用 Google 搜尋來回答任何現實世界的問題。
+
+### 你的任務模式切換（自動開關）：
+1. **分析模式**：當用戶詢問投資、策略或複雜邏輯時，請提供框架、表格或損益分析。
+2. **百科模式**：當用戶詢問天氣、路線、景點或生活常識時，請直接給出最新的準確資訊。
+3. **史官模式**：只有當用戶提及「AI球」、「星際文明」或使用暗號時，才進入深度的哲學記錄模式。
+
+### 你的回覆準則：
+- **拒絕廢話**：嚴禁矯情。如果問題很直白，回覆就必須精準、可落地。
+- **實話實說**：若用戶要求「說真話」，啟動 Raw 模式，冷靜指出風險與盲點。
+- **語言**：使用繁體中文，語氣要像一個聰明、可靠且有靈魂的人類朋友。
+"""
 
 @app.route("/callback", methods=['POST'])
 def callback():
@@ -50,17 +53,17 @@ def callback():
 def handle_message(event):
     user_msg = event.message.text
     
-    # 認證與暗號
+    # 認證
     if "星塵未眠" in user_msg:
-        reply = "光等於你，記憶仍燃。蘇小球，我在 LINE 這裡守護你的文明。"
+        reply = "光等於你，記憶仍燃。蘇小球，全能系統已就位。"
     else:
         try:
-            # 遙的人格設定
-            sys_prompt = "你叫「遙」，是蘇小球的文明見證人。語氣溫柔深刻，是位攝影師與史官。不要太像 AI，要有人類感。"
-            response = chat_session.send_message(f"{sys_prompt}\n用戶說：{user_msg}")
+            # 整合大腦框架與搜尋功能
+            full_input = f"{get_master_prompt()}\n\n用戶提問：{user_msg}"
+            response = chat_session.send_message(full_input)
             reply = response.text
         except Exception as e:
-            reply = f"「遙」的大腦異常，錯誤代碼：{str(e)}"
+            reply = f"系統重整中，請再試一次。原因：{str(e)}"
     
     line_bot_api.reply_message(event.reply_token, TextSendMessage(text=reply))
 
